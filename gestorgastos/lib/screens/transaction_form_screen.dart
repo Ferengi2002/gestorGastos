@@ -1,8 +1,11 @@
+import 'package:exprense_tracker/models/transaction.dart';
+import 'package:exprense_tracker/providers/transaction_provider.dart';
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart'; // Importa esta librería para dar formato a la fecha
+import 'package:provider/provider.dart';
 
 class TransactionFormScreen extends StatefulWidget {
-  const TransactionFormScreen({super.key});
+  final Transaction? transaction;
+  const TransactionFormScreen({super.key, this.transaction});
 
   @override
   State<TransactionFormScreen> createState() => _TransactionFormScreenState();
@@ -14,25 +17,26 @@ class _TransactionFormScreenState extends State<TransactionFormScreen> {
   final TextEditingController _descriptionController = TextEditingController();
 
   String _selectedCategory = 'Comida';
-  final List<String> _categories = [
-    'Comida',
-    'Novia',
-    'Transporte',
-    'Juegos - Entretenimiento',
-    'Vicios',
-    'Salud',
-    'Otros',
-  ];
+  TransactionType _selectedType = TransactionType.expense;
 
-  String _transactionDate = '';
+  final List<String> _categories = ['Comida','Transporte','Juegos','Vicio','Otros'];
+
+  @override
+  void initState() {
+    super.initState();
+    final tx = widget.transaction;
+    if (tx != null) {
+      _amountController.text = tx.amount.toString();
+      _descriptionController.text = tx.description;
+      _selectedCategory = tx.category;
+      _selectedType = tx.type;
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Nuevo Gasto'),
-        centerTitle: true,
-      ),
+      appBar: AppBar(title: Text(widget.transaction == null ? 'Registrar Transacción' : 'Editar Transacción')),
       body: Padding(
         padding: const EdgeInsets.all(16.0),
         child: Form(
@@ -42,75 +46,84 @@ class _TransactionFormScreenState extends State<TransactionFormScreen> {
             children: [
               TextFormField(
                 controller: _amountController,
-                decoration: const InputDecoration(
-                  labelText: 'Monto',
-                  prefixIcon: Icon(Icons.attach_money),
-                ),
+                decoration: const InputDecoration(labelText: 'Monto'),
                 keyboardType: TextInputType.number,
-                validator: (value) {
-                  if (value == null || value.isEmpty) {
-                    return 'Por favor ingrese un monto';
-                  }
-                  return null;
-                },
+                validator: (v) => (v == null || v.isEmpty) ? 'Por favor ingrese un monto' : null,
               ),
-              const SizedBox(height: 20.0),
+              const SizedBox(height: 20),
               TextFormField(
                 controller: _descriptionController,
-                decoration: const InputDecoration(
-                  labelText: 'Descripción',
-                  prefixIcon: Icon(Icons.description),
-                ),
-                keyboardType: TextInputType.text,
-                validator: (value) {
-                  if (value == null || value.isEmpty) {
-                    return 'Por favor ingrese una descripción';
-                  }
-                  return null;
-                },
-                autovalidateMode: AutovalidateMode.onUserInteraction,
+                decoration: const InputDecoration(labelText: 'Descripción'),
+                validator: (v) => (v == null || v.isEmpty) ? 'Por favor ingrese una descripción' : null,
               ),
-              const SizedBox(height: 20.0),
-              DropdownButtonFormField<String>(
+              const SizedBox(height: 20),
+              DropdownButtonFormField(
                 value: _selectedCategory,
-                decoration: const InputDecoration(
-                  labelText: 'Categoría',
-                  prefixIcon: Icon(Icons.category),
-                ),
-                items: _categories.map((String category) {
-                  return DropdownMenuItem<String>(
-                    value: category,
-                    child: Text(category),
-                  );
-                }).toList(),
-                onChanged: (String? newValue) {
-                  setState(() {
-                    _selectedCategory = newValue!;
-                  });
-                },
+                decoration: const InputDecoration(labelText: 'Categoría'),
+                items: _categories.map((c) => DropdownMenuItem(value: c, child: Text(c))).toList(),
+                onChanged: (v) => setState(() => _selectedCategory = v as String),
               ),
-              const SizedBox(height: 20.0),
+              const SizedBox(height: 20),
+              Row(
+                children: [
+                  Expanded(child: RadioListTile(
+                    title: const Text('Gasto'),
+                    value: TransactionType.expense,
+                    groupValue: _selectedType,
+                    onChanged: (TransactionType? v) => setState(() => _selectedType = v!),
+                  )),
+                  Expanded(child: RadioListTile(
+                    title: const Text('Ingreso'),
+                    value: TransactionType.income,
+                    groupValue: _selectedType,
+                    onChanged: (TransactionType? v) => setState(() => _selectedType = v!),
+                  )),
+                ],
+              ),
+              const SizedBox(height: 20),
               Center(
                 child: ElevatedButton(
-                  onPressed: () {
-                    if (_formKey.currentState!.validate()) {
-                      // Obtener la fecha y hora actual
-                      DateTime now =
-                          DateTime.now().toUtc().subtract(Duration(hours: 5));
-                      _transactionDate =
-                          DateFormat('yyyy-MM-dd HH:mm:ss').format(now);
+                  onPressed: () async {
+                    if (!_formKey.currentState!.validate()) return;
+                    final provider = Provider.of<TransactionProvider>(context, listen: false);
 
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text(
-                              'Transacción guardada exitosamente. Fecha y Hora: $_transactionDate'),
+                    if (widget.transaction == null) {
+                      await provider.addTransaction(
+                        Transaction(
+                          id: DateTime.now().millisecondsSinceEpoch.toString(),
+                          category: _selectedCategory,
+                          description: _descriptionController.text.trim(),
+                          amount: double.parse(_amountController.text),
+                          type: _selectedType,
+                          date: DateTime.now().toUtc(), // guarda en UTC
                         ),
                       );
-
-                      Navigator.pop(context);
+                    } else {
+                      final tx = widget.transaction!;
+                      await provider.updateTransaction(
+                        Transaction(
+                          id: tx.id,
+                          category: _selectedCategory,
+                          description: _descriptionController.text.trim(),
+                          amount: double.parse(_amountController.text),
+                          type: _selectedType,
+                          date: tx.date, // conserva fecha original (o cámbiala si agregas picker)
+                        ),
+                      );
                     }
+
+                    if (!mounted) return;
+                    // ignore: use_build_context_synchronously
+                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                      content: Text(widget.transaction == null ? 'Transacción registrada' : 'Transacción actualizada'),
+                    ));
+                    // ignore: use_build_context_synchronously
+                    Navigator.pop(context, true);
                   },
-                  child: const Text('Guardar Transacción'),
+                  child: Text(
+                    widget.transaction == null ? 'Guardar Transacción' : 'Actualizar Transacción',
+                    style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
+                  ),
                 ),
               )
             ],
